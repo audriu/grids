@@ -111,13 +111,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
           _highlightedCells.add((snap.$1 + r, snap.$2 + c));
         }
       } else if (isFromGrid) {
-        // No valid grid snap – highlight the first empty drawer slot.
-        for (int i = 0; i < MyGame.drawerSlots; i++) {
-          if (drawerPieces[i] == null) {
-            _highlightedDrawerIndex = i;
-            break;
-          }
-        }
+        // No valid grid snap – highlight the nearest empty drawer slot.
+        final idx = _findNearestEmptySlot(dragPos.x);
+        if (idx != -1) _highlightedDrawerIndex = idx;
       }
     }
     _refreshCellColors();
@@ -149,16 +145,33 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     _refreshCellColors();
   }
 
-  /// Put [piece] into the first empty drawer slot. Returns `true` on success.
-  bool returnPieceToDrawer(Tetromino piece) {
+  /// Put [piece] into the empty drawer slot closest to [canvasX].
+  /// Falls back to any empty slot. Returns `true` on success.
+  bool returnPieceToDrawer(Tetromino piece, [double? canvasX]) {
+    final idx = _findNearestEmptySlot(canvasX);
+    if (idx == -1) return false;
+    drawerPieces[idx] = piece;
+    if (idx < holders.length) holders[idx].piece = piece;
+    return true;
+  }
+
+  /// Find the nearest empty drawer slot to [canvasX], or -1 if none.
+  int _findNearestEmptySlot([double? canvasX]) {
+    if (holders.isEmpty) return -1;
+    int best = -1;
+    double bestDist = double.infinity;
     for (int i = 0; i < MyGame.drawerSlots; i++) {
-      if (drawerPieces[i] == null) {
-        drawerPieces[i] = piece;
-        if (i < holders.length) holders[i].piece = piece;
-        return true;
+      if (drawerPieces[i] != null) continue;
+      if (canvasX == null) return i; // no position hint, take first
+      final slotCenterX =
+          holders[i].position.x + holders[i].size.x / 2;
+      final dist = (canvasX - slotCenterX).abs();
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
       }
     }
-    return false;
+    return best;
   }
 
   // ────────── snap logic ──────────
@@ -363,7 +376,7 @@ class Cell extends RectangleComponent with DragCallbacks {
         board!.placePiece(piece, snap.$1, snap.$2);
         placed = true;
       } else {
-        placed = board!.returnPieceToDrawer(piece);
+        placed = board!.returnPieceToDrawer(piece, _dragPiece!.position.x);
       }
     }
 
@@ -450,10 +463,8 @@ class PieceHolder extends PositionComponent with DragCallbacks {
     final snap = board.findSnapOrigin(piece!, _dragPiece!.position);
     if (snap != null) {
       board.placePiece(piece!, snap.$1, snap.$2);
-      // Spawn a new random piece in this holder.
-      piece = Tetromino.random();
-      board.currentPiece = piece!;
-      board.drawerPieces[index] = piece;
+      piece = null;
+      board.drawerPieces[index] = null;
     }
 
     board.updateHighlight(null, null);
