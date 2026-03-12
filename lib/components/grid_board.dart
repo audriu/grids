@@ -28,12 +28,27 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   final Set<(int, int)> _highlightedCells = {};
   Color? _highlightColor;
 
+  /// Drawer slot index currently highlighted (-1 = none).
+  int _highlightedDrawerIndex = -1;
+
   late Tetromino currentPiece;
+
+  /// Track each piece placed on the grid so it can be dragged back.
+  final List<({Tetromino piece, int originRow, int originCol})> placedPieces =
+      [];
+
+  /// References to drawer holders (refreshed on layout).
+  final List<PieceHolder> holders = [];
+
+  /// Pieces currently in the drawer (survives layout rebuilds).
+  final List<Tetromino?> drawerPieces =
+      List.filled(MyGame.drawerSlots, null);
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
     currentPiece = Tetromino.random();
+    drawerPieces[0] = currentPiece;
     _layoutGrid();
   }
 
@@ -59,6 +74,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     for (final (r, c) in piece.cells) {
       gridState[originRow + r][originCol + c] = piece.color;
     }
+    placedPieces.add(
+      (piece: piece, originRow: originRow, originCol: originCol),
+    );
     _refreshCellColors();
     return true;
   }
@@ -69,7 +87,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         final key = (child.row, child.col);
         if (_highlightedCells.contains(key)) {
           child.paint = Paint()
-            ..color = (_highlightColor ?? const Color(0xFFFFFFFF)).withAlpha(80);
+            ..color = (_highlightColor ?? const Color(0xFFFFFFFF)).withAlpha(140);
         } else {
           child.paint = Paint()
             ..color =
@@ -80,9 +98,11 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   }
 
   /// Update the highlighted preview cells based on current drag position.
-  void updateHighlight(Tetromino? piece, Vector2? dragPos) {
+  void updateHighlight(Tetromino? piece, Vector2? dragPos,
+      {bool isFromGrid = false}) {
     _highlightedCells.clear();
     _highlightColor = null;
+    _highlightedDrawerIndex = -1;
     if (piece != null && dragPos != null) {
       final snap = findSnapOrigin(piece, dragPos);
       if (snap != null) {
@@ -90,9 +110,55 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         for (final (r, c) in piece.cells) {
           _highlightedCells.add((snap.$1 + r, snap.$2 + c));
         }
+      } else if (isFromGrid) {
+        // No valid grid snap – highlight the first empty drawer slot.
+        for (int i = 0; i < MyGame.drawerSlots; i++) {
+          if (drawerPieces[i] == null) {
+            _highlightedDrawerIndex = i;
+            break;
+          }
+        }
       }
     }
     _refreshCellColors();
+  }
+
+  // ────────── piece retrieval ──────────
+
+  /// Find which placed piece occupies [row],[col], or `null`.
+  ({Tetromino piece, int originRow, int originCol})? findPlacedPieceAt(
+    int row,
+    int col,
+  ) {
+    for (final pp in placedPieces) {
+      for (final (r, c) in pp.piece.cells) {
+        if (pp.originRow + r == row && pp.originCol + c == col) return pp;
+      }
+    }
+    return null;
+  }
+
+  /// Remove a previously placed piece from the grid.
+  void removePlacedPiece(
+    ({Tetromino piece, int originRow, int originCol}) pp,
+  ) {
+    for (final (r, c) in pp.piece.cells) {
+      gridState[pp.originRow + r][pp.originCol + c] = null;
+    }
+    placedPieces.remove(pp);
+    _refreshCellColors();
+  }
+
+  /// Put [piece] into the first empty drawer slot. Returns `true` on success.
+  bool returnPieceToDrawer(Tetromino piece) {
+    for (int i = 0; i < MyGame.drawerSlots; i++) {
+      if (drawerPieces[i] == null) {
+        drawerPieces[i] = piece;
+        if (i < holders.length) holders[i].piece = piece;
+        return true;
+      }
+    }
+    return false;
   }
 
   // ────────── snap logic ──────────
@@ -167,6 +233,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     mainOffsetY = topY + cellPadding;
 
     removeAll(children);
+    holders.clear();
 
     // Main grid
     for (int row = 0; row < MyGame.rows; row++) {
@@ -180,6 +247,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
             row: row,
             col: col,
             color: gridState[row][col],
+            board: this,
           ),
         );
       }
@@ -191,23 +259,25 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
 
     for (int i = 0; i < MyGame.drawerSlots; i++) {
       final x = drawerOffsetX + i * (holderSize + cellPadding);
-      add(
-        PieceHolder(
-          position: Vector2(x, drawerOffsetY),
-          size: Vector2.all(holderSize),
-          piece: i == 0 ? currentPiece : null,
-          board: this,
-        ),
+      final holder = PieceHolder(
+        position: Vector2(x, drawerOffsetY),
+        size: Vector2.all(holderSize),
+        piece: drawerPieces[i],
+        board: this,
+        index: i,
       );
+      holders.add(holder);
+      add(holder);
     }
   }
 }
 
 // ─────────────────────── Cell ───────────────────────
 
-class Cell extends RectangleComponent {
+class Cell extends RectangleComponent with DragCallbacks {
   final int row;
   final int col;
+  final GridBoard? board;
 
   Cell({
     required super.position,
@@ -215,7 +285,101 @@ class Cell extends RectangleComponent {
     required this.row,
     required this.col,
     Color? color,
+    this.board,
   }) : super(paint: Paint()..color = color ?? const Color(0xFF2A2A4A));
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    add(RectangleHitbox());
+  }
+
+  // ── drag-back handling ──
+
+  DraggablePiece? _dragPiece;
+  ({Tetromino piece, int originRow, int originCol})? _draggedPlacement;
+
+  @override
+  void onDragStart(DragStartEvent event) {
+    if (board == null) return;
+    final pp = board!.findPlacedPieceAt(row, col);
+    if (pp == null) return;
+    super.onDragStart(event);
+
+    _draggedPlacement = pp;
+    board!.removePlacedPiece(pp);
+
+    final step = board!.cellSize + GridBoard.cellPadding;
+    int minR = 999, maxR = 0, minC = 999, maxC = 0;
+    for (final (r, c) in pp.piece.cells) {
+      if (r < minR) minR = r;
+      if (r > maxR) maxR = r;
+      if (c < minC) minC = c;
+      if (c > maxC) maxC = c;
+    }
+    final pieceW = (maxC - minC + 1) * step;
+    final pieceH = (maxR - minR + 1) * step;
+
+    final pos = event.canvasPosition;
+    _dragPiece = DraggablePiece(
+      piece: pp.piece,
+      cellSize: board!.cellSize,
+      cellPadding: GridBoard.cellPadding,
+      position: Vector2(pos.x - pieceW / 2, pos.y - pieceH / 2),
+    );
+    board!.game.add(_dragPiece!);
+  }
+
+  @override
+  void onDragUpdate(DragUpdateEvent event) {
+    _dragPiece?.position.add(event.canvasDelta);
+    if (_dragPiece != null && _draggedPlacement != null) {
+      board!.updateHighlight(_draggedPlacement!.piece, _dragPiece!.position,
+          isFromGrid: true);
+    }
+  }
+
+  @override
+  void onDragEnd(DragEndEvent event) {
+    super.onDragEnd(event);
+    _finishDrag();
+  }
+
+  @override
+  void onDragCancel(DragCancelEvent event) {
+    super.onDragCancel(event);
+    _finishDrag(forceRestore: true);
+  }
+
+  void _finishDrag({bool forceRestore = false}) {
+    if (_dragPiece == null || _draggedPlacement == null) return;
+
+    final piece = _draggedPlacement!.piece;
+    bool placed = false;
+
+    if (!forceRestore) {
+      final snap = board!.findSnapOrigin(piece, _dragPiece!.position);
+      if (snap != null) {
+        board!.placePiece(piece, snap.$1, snap.$2);
+        placed = true;
+      } else {
+        placed = board!.returnPieceToDrawer(piece);
+      }
+    }
+
+    if (!placed) {
+      board!.placePiece(
+        piece,
+        _draggedPlacement!.originRow,
+        _draggedPlacement!.originCol,
+      );
+    }
+
+    board!.updateHighlight(null, null);
+    _dragPiece!.removeFromParent();
+    _dragPiece = null;
+    _draggedPlacement = null;
+  }
 }
 
 // ────────────────────── PieceHolder ──────────────────────
@@ -224,6 +388,7 @@ class Cell extends RectangleComponent {
 class PieceHolder extends PositionComponent with DragCallbacks {
   Tetromino? piece;
   final GridBoard board;
+  final int index;
   DraggablePiece? _dragPiece;
 
   PieceHolder({
@@ -231,6 +396,7 @@ class PieceHolder extends PositionComponent with DragCallbacks {
     required super.size,
     this.piece,
     required this.board,
+    required this.index,
   });
 
   @override
@@ -287,6 +453,7 @@ class PieceHolder extends PositionComponent with DragCallbacks {
       // Spawn a new random piece in this holder.
       piece = Tetromino.random();
       board.currentPiece = piece!;
+      board.drawerPieces[index] = piece;
     }
 
     board.updateHighlight(null, null);
@@ -298,7 +465,23 @@ class PieceHolder extends PositionComponent with DragCallbacks {
 
   @override
   void render(Canvas canvas) {
-    canvas.drawRect(size.toRect(), Paint()..color = const Color(0xFF2A2A4A));
+    final isHighlighted = board._highlightedDrawerIndex == index;
+    canvas.drawRect(
+      size.toRect(),
+      Paint()
+        ..color = isHighlighted
+            ? const Color(0xFF4A4A6A)
+            : const Color(0xFF2A2A4A),
+    );
+    if (isHighlighted) {
+      canvas.drawRect(
+        size.toRect(),
+        Paint()
+          ..color = const Color(0xFF8888FF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+    }
     if (piece == null) return;
 
     int minRow = 999, maxRow = 0, minCol = 999, maxCol = 0;
