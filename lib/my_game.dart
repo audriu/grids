@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'components/grid_board.dart';
 
-class MyGame extends FlameGame {
+class MyGame extends FlameGame with HasCollisionDetection {
   static const int rows = 7;
   static const int columns = 7;
   static const int drawerSlots = 8;
