@@ -6,8 +6,7 @@ import 'components/grid_board.dart';
 class MyGame extends FlameGame {
   static const int rows = 7;
   static const int columns = 7;
-  static const int drawerRows = 2;
-  static const int drawerColumns = 4;
+  static const int drawerSlots = 8;
 
   @override
   Color backgroundColor() => const Color(0xFF1A1A2E);

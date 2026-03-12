@@ -3,13 +3,17 @@ import 'dart:ui';
 import 'package:flame/components.dart';
 
 import '../my_game.dart';
+import 'tetromino.dart';
 
 class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   static const double cellPadding = 2.0;
 
+  late Tetromino currentPiece;
+
   @override
   Future<void> onLoad() async {
     await super.onLoad();
+    currentPiece = Tetromino.random();
     _layoutGrid();
   }
 
@@ -22,23 +26,29 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   void _layoutGrid() {
     final screenSize = game.size;
 
-    // Calculate cell size so both grids fit vertically with a gap
+    // Calculate cell size so main grid + holder square fit vertically
     final gap = 16.0;
-    final totalRows = MyGame.rows + MyGame.drawerRows;
+    // holder is 1 cell tall
+    final totalVerticalCells = MyGame.rows + 1;
     final availableHeight = screenSize.y - gap;
-    final maxCellByHeight = (availableHeight - cellPadding * (totalRows + 2)) / totalRows;
-    final maxCellByWidth = (screenSize.x - cellPadding * (MyGame.columns + 1)) / MyGame.columns;
-    final cellSize = maxCellByHeight < maxCellByWidth ? maxCellByHeight : maxCellByWidth;
+    final maxCellByHeight =
+        (availableHeight - cellPadding * (totalVerticalCells + 2)) /
+            totalVerticalCells;
+    final maxCellByWidth =
+        (screenSize.x - cellPadding * (MyGame.columns + 1)) / MyGame.columns;
+    final cellSize = maxCellByHeight < maxCellByWidth
+        ? maxCellByHeight
+        : maxCellByWidth;
 
     // Main grid dimensions
-    final mainGridWidth = MyGame.columns * (cellSize + cellPadding) + cellPadding;
+    final mainGridWidth =
+        MyGame.columns * (cellSize + cellPadding) + cellPadding;
     final mainGridHeight = MyGame.rows * (cellSize + cellPadding) + cellPadding;
 
-    // Drawer grid dimensions
-    final drawerWidth = MyGame.drawerColumns * (cellSize + cellPadding) + cellPadding;
-    final drawerHeight = MyGame.drawerRows * (cellSize + cellPadding) + cellPadding;
-
-    final totalHeight = mainGridHeight + gap + drawerHeight;
+    final holderSize = cellSize;
+    final drawerWidth =
+        MyGame.drawerSlots * (holderSize + cellPadding) + cellPadding;
+    final totalHeight = mainGridHeight + gap + holderSize;
     final topY = (screenSize.y - totalHeight) / 2;
 
     // Main grid offset (centered horizontally)
@@ -52,30 +62,30 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       for (int col = 0; col < MyGame.columns; col++) {
         final x = mainOffsetX + col * (cellSize + cellPadding);
         final y = mainOffsetY + row * (cellSize + cellPadding);
-        add(Cell(
-          position: Vector2(x, y),
-          size: Vector2.all(cellSize),
-          row: row,
-          col: col,
-        ));
+        add(
+          Cell(
+            position: Vector2(x, y),
+            size: Vector2.all(cellSize),
+            row: row,
+            col: col,
+          ),
+        );
       }
     }
 
-    // Drawer grid (2x4, centered horizontally below main grid)
+    // Drawer: 8 holder cells in a row, centered below the main grid
     final drawerOffsetX = (screenSize.x - drawerWidth) / 2 + cellPadding;
-    final drawerOffsetY = topY + mainGridHeight + gap + cellPadding;
+    final drawerOffsetY = topY + mainGridHeight + gap;
 
-    for (int row = 0; row < MyGame.drawerRows; row++) {
-      for (int col = 0; col < MyGame.drawerColumns; col++) {
-        final x = drawerOffsetX + col * (cellSize + cellPadding);
-        final y = drawerOffsetY + row * (cellSize + cellPadding);
-        add(DrawerCell(
-          position: Vector2(x, y),
-          size: Vector2.all(cellSize),
-          row: row,
-          col: col,
-        ));
-      }
+    for (int i = 0; i < MyGame.drawerSlots; i++) {
+      final x = drawerOffsetX + i * (holderSize + cellPadding);
+      add(
+        PieceHolder(
+          position: Vector2(x, drawerOffsetY),
+          size: Vector2.all(holderSize),
+          piece: i == 0 ? currentPiece : null,
+        ),
+      );
     }
   }
 }
@@ -89,21 +99,63 @@ class Cell extends RectangleComponent {
     required super.size,
     required this.row,
     required this.col,
-  }) : super(
-          paint: Paint()..color = const Color(0xFF2A2A4A),
-        );
+  }) : super(paint: Paint()..color = const Color(0xFF2A2A4A));
 }
 
-class DrawerCell extends RectangleComponent {
-  final int row;
-  final int col;
+/// A single square that renders a miniature tetromino inside it.
+class PieceHolder extends PositionComponent {
+  final Tetromino? piece;
 
-  DrawerCell({
+  PieceHolder({
     required super.position,
     required super.size,
-    required this.row,
-    required this.col,
-  }) : super(
-          paint: Paint()..color = const Color(0xFF3A3A5A),
-        );
+    this.piece,
+  });
+
+  @override
+  void render(Canvas canvas) {
+    // Background
+    canvas.drawRect(
+      size.toRect(),
+      Paint()..color = const Color(0xFF2A2A4A),
+    );
+
+    if (piece == null) return;
+
+    // Determine bounding box of the piece cells
+    int minRow = 999, maxRow = 0, minCol = 999, maxCol = 0;
+    for (final (r, c) in piece!.cells) {
+      if (r < minRow) minRow = r;
+      if (r > maxRow) maxRow = r;
+      if (c < minCol) minCol = c;
+      if (c > maxCol) maxCol = c;
+    }
+    final pieceRows = maxRow - minRow + 1;
+    final pieceCols = maxCol - minCol + 1;
+
+    // Fit the piece into the square with some padding
+    final padding = size.x * 0.15;
+    final available = size.x - padding * 2;
+    final miniCellSize = available / (pieceRows > pieceCols ? pieceRows : pieceCols);
+    final miniGap = 1.0;
+
+    final totalW = pieceCols * miniCellSize;
+    final totalH = pieceRows * miniCellSize;
+    final startX = padding + (available - totalW) / 2;
+    final startY = padding + (available - totalH) / 2;
+
+    final fillPaint = Paint()..color = piece!.color;
+
+    for (final (r, c) in piece!.cells) {
+      final x = startX + (c - minCol) * miniCellSize + miniGap;
+      final y = startY + (r - minRow) * miniCellSize + miniGap;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, y, miniCellSize - miniGap * 2, miniCellSize - miniGap * 2),
+          const Radius.circular(2),
+        ),
+        fillPaint,
+      );
+    }
+  }
 }
