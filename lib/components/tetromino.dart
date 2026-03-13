@@ -49,9 +49,9 @@ class Tetromino {
     color = _shapeColor(type);
   }
 
-  static Tetromino random() {
+  static Tetromino random({int level = 1}) {
     final types = TetrominoType.values;
-    return Tetromino(types[Random().nextInt(types.length)]);
+    return Tetromino(types[Random().nextInt(types.length)], level: level);
   }
 
   static List<(int, int)> _shapeCells(TetrominoType type) {
