@@ -35,13 +35,16 @@ enum TetrominoType {
 class Tetromino {
   final TetrominoType type;
 
+  /// Level displayed at the centre of the piece (default 1).
+  int level;
+
   /// Shape as list of (row, col) offsets within a 2x4 grid.
   late final List<(int, int)> cells;
 
   /// Color for this piece.
   late final Color color;
 
-  Tetromino(this.type) {
+  Tetromino(this.type, {this.level = 1}) {
     cells = _shapeCells(type);
     color = _shapeColor(type);
   }

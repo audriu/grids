@@ -283,6 +283,54 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       add(holder);
     }
   }
+
+  @override
+  void renderTree(Canvas canvas) {
+    super.renderTree(canvas);
+    _renderPlacedPieceLevels(canvas);
+  }
+
+  void _renderPlacedPieceLevels(Canvas canvas) {
+    final step = cellSize + cellPadding;
+    for (final pp in placedPieces) {
+      int minR = 999, maxR = 0, minC = 999, maxC = 0;
+      for (final (r, c) in pp.piece.cells) {
+        final row = pp.originRow + r;
+        final col = pp.originCol + c;
+        if (row < minR) minR = row;
+        if (row > maxR) maxR = row;
+        if (col < minC) minC = col;
+        if (col > maxC) maxC = col;
+      }
+      final centerX = mainOffsetX + (minC + maxC) / 2.0 * step + cellSize / 2;
+      final centerY = mainOffsetY + (minR + maxR) / 2.0 * step + cellSize / 2;
+      _drawLevelText(canvas, '${pp.piece.level}', centerX, centerY, cellSize * 0.5);
+    }
+  }
+}
+
+/// Draw [text] centred at ([cx], [cy]) with a black outline for readability.
+void _drawLevelText(Canvas canvas, String text, double cx, double cy, double fontSize) {
+  final style = TextStyle(
+    color: const Color(0xFFFFFFFF),
+    fontSize: fontSize,
+    fontWeight: FontWeight.w900,
+    shadows: [
+      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(1, 1)),
+      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(-1, -1)),
+      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(1, -1)),
+      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(-1, 1)),
+    ],
+  );
+  final builder = ParagraphBuilder(ParagraphStyle(textAlign: TextAlign.center))
+    ..pushStyle(style)
+    ..addText(text);
+  final paragraph = builder.build()
+    ..layout(ParagraphConstraints(width: fontSize * 3));
+  canvas.drawParagraph(
+    paragraph,
+    Offset(cx - paragraph.width / 2, cy - paragraph.height / 2),
+  );
 }
 
 // ─────────────────────── Cell ───────────────────────
@@ -534,6 +582,11 @@ class PieceHolder extends PositionComponent with DragCallbacks {
         fillPaint,
       );
     }
+
+    // Draw level number at the centre of the mini piece.
+    final pieceCenterX = startX + totalW / 2;
+    final pieceCenterY = startY + totalH / 2;
+    _drawLevelText(canvas, '${piece!.level}', pieceCenterX, pieceCenterY, miniCellSize * 0.6);
   }
 }
 
@@ -555,10 +608,12 @@ class DraggablePiece extends PositionComponent {
 
   @override
   void render(Canvas canvas) {
-    int minR = 999, minC = 999;
+    int minR = 999, maxR = 0, minC = 999, maxC = 0;
     for (final (r, c) in piece.cells) {
       if (r < minR) minR = r;
+      if (r > maxR) maxR = r;
       if (c < minC) minC = c;
+      if (c > maxC) maxC = c;
     }
 
     final step = cellSize + cellPadding;
@@ -576,5 +631,10 @@ class DraggablePiece extends PositionComponent {
         fillPaint,
       );
     }
+
+    // Draw level number at the centre of the dragged piece.
+    final bboxW = (maxC - minC + 1) * step;
+    final bboxH = (maxR - minR + 1) * step;
+    _drawLevelText(canvas, '${piece.level}', bboxW / 2, bboxH / 2, cellSize * 0.5);
   }
 }
