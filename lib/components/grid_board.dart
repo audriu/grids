@@ -41,8 +41,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   final List<PieceHolder> holders = [];
 
   /// Pieces currently in the drawer (survives layout rebuilds).
-  final List<Tetromino?> drawerPieces =
-      List.filled(MyGame.drawerSlots, null);
+  final List<Tetromino?> drawerPieces = List.filled(MyGame.drawerSlots, null);
 
   @override
   Future<void> onLoad() async {
@@ -50,6 +49,15 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     currentPiece = Tetromino.random();
     drawerPieces[0] = currentPiece;
     _layoutGrid();
+  }
+
+  /// Recalculate earnings/sec from pieces placed on the grid.
+  void _recalcEarnings() {
+    double eps = 0;
+    for (final pp in placedPieces) {
+      eps += MyGame.earningsForLevel(pp.piece.level);
+    }
+    game.earningsPerSecond = eps;
   }
 
   @override
@@ -74,10 +82,13 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     for (final (r, c) in piece.cells) {
       gridState[originRow + r][originCol + c] = piece.color;
     }
-    placedPieces.add(
-      (piece: piece, originRow: originRow, originCol: originCol),
-    );
+    placedPieces.add((
+      piece: piece,
+      originRow: originRow,
+      originCol: originCol,
+    ));
     _refreshCellColors();
+    _recalcEarnings();
     return true;
   }
 
@@ -87,7 +98,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         final key = (child.row, child.col);
         if (_highlightedCells.contains(key)) {
           child.paint = Paint()
-            ..color = (_highlightColor ?? const Color(0xFFFFFFFF)).withAlpha(140);
+            ..color = (_highlightColor ?? const Color(0xFFFFFFFF)).withAlpha(
+              140,
+            );
         } else {
           child.paint = Paint()
             ..color =
@@ -98,8 +111,11 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   }
 
   /// Update the highlighted preview cells based on current drag position.
-  void updateHighlight(Tetromino? piece, Vector2? dragPos,
-      {bool isFromGrid = false}) {
+  void updateHighlight(
+    Tetromino? piece,
+    Vector2? dragPos, {
+    bool isFromGrid = false,
+  }) {
     _highlightedCells.clear();
     _highlightColor = null;
     _highlightedDrawerIndex = -1;
@@ -135,14 +151,13 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   }
 
   /// Remove a previously placed piece from the grid.
-  void removePlacedPiece(
-    ({Tetromino piece, int originRow, int originCol}) pp,
-  ) {
+  void removePlacedPiece(({Tetromino piece, int originRow, int originCol}) pp) {
     for (final (r, c) in pp.piece.cells) {
       gridState[pp.originRow + r][pp.originCol + c] = null;
     }
     placedPieces.remove(pp);
     _refreshCellColors();
+    _recalcEarnings();
   }
 
   /// Put [piece] into the empty drawer slot closest to [canvasX].
@@ -163,8 +178,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     for (int i = 0; i < MyGame.drawerSlots; i++) {
       if (drawerPieces[i] != null) continue;
       if (canvasX == null) return i; // no position hint, take first
-      final slotCenterX =
-          holders[i].position.x + holders[i].size.x / 2;
+      final slotCenterX = holders[i].position.x + holders[i].size.x / 2;
       final dist = (canvasX - slotCenterX).abs();
       if (dist < bestDist) {
         bestDist = dist;
@@ -304,22 +318,50 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       }
       final centerX = mainOffsetX + (minC + maxC) / 2.0 * step + cellSize / 2;
       final centerY = mainOffsetY + (minR + maxR) / 2.0 * step + cellSize / 2;
-      _drawLevelText(canvas, '${pp.piece.level}', centerX, centerY, cellSize * 0.5);
+      _drawLevelText(
+        canvas,
+        '${pp.piece.level}',
+        centerX,
+        centerY,
+        cellSize * 0.5,
+      );
     }
   }
 }
 
 /// Draw [text] centred at ([cx], [cy]) with a black outline for readability.
-void _drawLevelText(Canvas canvas, String text, double cx, double cy, double fontSize) {
+void _drawLevelText(
+  Canvas canvas,
+  String text,
+  double cx,
+  double cy,
+  double fontSize,
+) {
   final style = TextStyle(
     color: const Color(0xFFFFFFFF),
     fontSize: fontSize,
     fontWeight: FontWeight.w900,
     shadows: [
-      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(1, 1)),
-      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(-1, -1)),
-      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(1, -1)),
-      Shadow(color: const Color(0xFF000000), blurRadius: 3, offset: const Offset(-1, 1)),
+      Shadow(
+        color: const Color(0xFF000000),
+        blurRadius: 3,
+        offset: const Offset(1, 1),
+      ),
+      Shadow(
+        color: const Color(0xFF000000),
+        blurRadius: 3,
+        offset: const Offset(-1, -1),
+      ),
+      Shadow(
+        color: const Color(0xFF000000),
+        blurRadius: 3,
+        offset: const Offset(1, -1),
+      ),
+      Shadow(
+        color: const Color(0xFF000000),
+        blurRadius: 3,
+        offset: const Offset(-1, 1),
+      ),
     ],
   );
   final builder = ParagraphBuilder(ParagraphStyle(textAlign: TextAlign.center))
@@ -395,8 +437,11 @@ class Cell extends RectangleComponent with DragCallbacks {
   void onDragUpdate(DragUpdateEvent event) {
     _dragPiece?.position.add(event.canvasDelta);
     if (_dragPiece != null && _draggedPlacement != null) {
-      board!.updateHighlight(_draggedPlacement!.piece, _dragPiece!.position,
-          isFromGrid: true);
+      board!.updateHighlight(
+        _draggedPlacement!.piece,
+        _dragPiece!.position,
+        isFromGrid: true,
+      );
     }
   }
 
@@ -586,7 +631,13 @@ class PieceHolder extends PositionComponent with DragCallbacks {
     // Draw level number at the centre of the mini piece.
     final pieceCenterX = startX + totalW / 2;
     final pieceCenterY = startY + totalH / 2;
-    _drawLevelText(canvas, '${piece!.level}', pieceCenterX, pieceCenterY, miniCellSize * 0.6);
+    _drawLevelText(
+      canvas,
+      '${piece!.level}',
+      pieceCenterX,
+      pieceCenterY,
+      miniCellSize * 0.6,
+    );
   }
 }
 
@@ -635,6 +686,12 @@ class DraggablePiece extends PositionComponent {
     // Draw level number at the centre of the dragged piece.
     final bboxW = (maxC - minC + 1) * step;
     final bboxH = (maxR - minR + 1) * step;
-    _drawLevelText(canvas, '${piece.level}', bboxW / 2, bboxH / 2, cellSize * 0.5);
+    _drawLevelText(
+      canvas,
+      '${piece.level}',
+      bboxW / 2,
+      bboxH / 2,
+      cellSize * 0.5,
+    );
   }
 }
