@@ -31,6 +31,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   /// Drawer slot index currently highlighted (-1 = none).
   int _highlightedDrawerIndex = -1;
 
+  /// Drawer slot index highlighted for a merge (red), -1 = none.
+  int _mergeHighlightIndex = -1;
+
   late Tetromino currentPiece;
 
   /// Track each piece placed on the grid so it can be dragged back.
@@ -115,10 +118,12 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     Tetromino? piece,
     Vector2? dragPos, {
     bool isFromGrid = false,
+    int? dragSourceSlot,
   }) {
     _highlightedCells.clear();
     _highlightColor = null;
     _highlightedDrawerIndex = -1;
+    _mergeHighlightIndex = -1;
     if (piece != null && dragPos != null) {
       final snap = findSnapOrigin(piece, dragPos);
       if (snap != null) {
@@ -126,13 +131,52 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         for (final (r, c) in piece.cells) {
           _highlightedCells.add((snap.$1 + r, snap.$2 + c));
         }
-      } else if (isFromGrid) {
-        // No valid grid snap – highlight the nearest empty drawer slot.
-        final idx = _findNearestEmptySlot(dragPos.x);
-        if (idx != -1) _highlightedDrawerIndex = idx;
+      } else {
+        // Check for merge target in drawer.
+        final mergeIdx = _findMergeTarget(piece, dragPos.x, dragSourceSlot);
+        if (mergeIdx != -1) {
+          _mergeHighlightIndex = mergeIdx;
+        } else if (isFromGrid) {
+          final idx = _findNearestEmptySlot(dragPos.x);
+          if (idx != -1) _highlightedDrawerIndex = idx;
+        }
       }
     }
     _refreshCellColors();
+  }
+
+  /// Find the nearest drawer slot that holds a piece of the same level for
+  /// merging. [excludeSlot] is the slot the piece was dragged from (skip it).
+  int _findMergeTarget(Tetromino piece, double canvasX, [int? excludeSlot]) {
+    if (holders.isEmpty) return -1;
+    int best = -1;
+    double bestDist = double.infinity;
+    for (int i = 0; i < MyGame.drawerSlots; i++) {
+      if (i == excludeSlot) continue;
+      final existing = drawerPieces[i];
+      if (existing == null) continue;
+      if (existing.level != piece.level) continue;
+      final slotCenterX = holders[i].position.x + holders[i].size.x / 2;
+      final dist = (canvasX - slotCenterX).abs();
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /// Merge the dragged [piece] with the piece at drawer slot [targetIdx].
+  /// Produces a new random piece one level higher.
+  void mergePieces(Tetromino piece, int targetIdx) {
+    final newLevel = piece.level + 1;
+    final merged = Tetromino.random(level: newLevel);
+    drawerPieces[targetIdx] = merged;
+    if (targetIdx < holders.length) holders[targetIdx].piece = merged;
+    // Unlock in shop if needed.
+    if (newLevel > game.maxUnlockedLevel) {
+      game.unlockNextLevel();
+    }
   }
 
   // ────────── piece retrieval ──────────
@@ -469,7 +513,17 @@ class Cell extends RectangleComponent with DragCallbacks {
         board!.placePiece(piece, snap.$1, snap.$2);
         placed = true;
       } else {
-        placed = board!.returnPieceToDrawer(piece, _dragPiece!.position.x);
+        // Check for merge target in drawer.
+        final mergeIdx = board!._findMergeTarget(
+          piece,
+          _dragPiece!.position.x,
+        );
+        if (mergeIdx != -1) {
+          board!.mergePieces(piece, mergeIdx);
+          placed = true;
+        } else {
+          placed = board!.returnPieceToDrawer(piece, _dragPiece!.position.x);
+        }
       }
     }
 
@@ -544,7 +598,7 @@ class PieceHolder extends PositionComponent with DragCallbacks {
   void onDragUpdate(DragUpdateEvent event) {
     _dragPiece?.position.add(event.canvasDelta);
     if (_dragPiece != null && piece != null) {
-      board.updateHighlight(piece, _dragPiece!.position);
+      board.updateHighlight(piece, _dragPiece!.position, dragSourceSlot: index);
     }
   }
 
@@ -558,6 +612,18 @@ class PieceHolder extends PositionComponent with DragCallbacks {
       board.placePiece(piece!, snap.$1, snap.$2);
       piece = null;
       board.drawerPieces[index] = null;
+    } else {
+      // Check for merge target.
+      final mergeIdx = board._findMergeTarget(
+        piece!,
+        _dragPiece!.position.x,
+        index,
+      );
+      if (mergeIdx != -1) {
+        board.mergePieces(piece!, mergeIdx);
+        piece = null;
+        board.drawerPieces[index] = null;
+      }
     }
 
     board.updateHighlight(null, null);
@@ -570,14 +636,25 @@ class PieceHolder extends PositionComponent with DragCallbacks {
   @override
   void render(Canvas canvas) {
     final isHighlighted = board._highlightedDrawerIndex == index;
+    final isMergeTarget = board._mergeHighlightIndex == index;
     canvas.drawRect(
       size.toRect(),
       Paint()
-        ..color = isHighlighted
-            ? const Color(0xFF4A4A6A)
-            : const Color(0xFF2A2A4A),
+        ..color = isMergeTarget
+            ? const Color(0xFF5A2020)
+            : isHighlighted
+                ? const Color(0xFF4A4A6A)
+                : const Color(0xFF2A2A4A),
     );
-    if (isHighlighted) {
+    if (isMergeTarget) {
+      canvas.drawRect(
+        size.toRect(),
+        Paint()
+          ..color = const Color(0xFFFF4444)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+    } else if (isHighlighted) {
       canvas.drawRect(
         size.toRect(),
         Paint()
