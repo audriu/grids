@@ -1,6 +1,6 @@
-# flame_game
+# Idle Pieces Grid Game
 
-A new Flutter project.
+An idle grid-based puzzle game built with Flutter and Flame.
 
 ## Getting Started
 

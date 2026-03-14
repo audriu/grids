@@ -514,10 +514,7 @@ class Cell extends RectangleComponent with DragCallbacks {
         placed = true;
       } else {
         // Check for merge target in drawer.
-        final mergeIdx = board!._findMergeTarget(
-          piece,
-          _dragPiece!.position.x,
-        );
+        final mergeIdx = board!._findMergeTarget(piece, _dragPiece!.position.x);
         if (mergeIdx != -1) {
           board!.mergePieces(piece, mergeIdx);
           placed = true;
@@ -643,8 +640,8 @@ class PieceHolder extends PositionComponent with DragCallbacks {
         ..color = isMergeTarget
             ? const Color(0xFF5A2020)
             : isHighlighted
-                ? const Color(0xFF4A4A6A)
-                : const Color(0xFF2A2A4A),
+            ? const Color(0xFF4A4A6A)
+            : const Color(0xFF2A2A4A),
     );
     if (isMergeTarget) {
       canvas.drawRect(
