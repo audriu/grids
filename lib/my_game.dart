@@ -68,7 +68,7 @@ class MyGame extends FlameGame with HasCollisionDetection {
     if (!_gridBoard.returnPieceToDrawer(piece)) return false;
 
     cash -= price;
-    shopPrices[level] = price * 1.5;
+    shopPrices[level] = price * 2.0;
     shopOffers[level] = Tetromino.random(level: level);
     return true;
   }
@@ -92,10 +92,10 @@ class MyGame extends FlameGame with HasCollisionDetection {
     cash += earningsPerSecond * dt;
   }
 
-  /// Earnings per second for a given level: level 1 = 1, level 2 = 2, level 3 = 4, etc.
+  /// Earnings per second for a given level (10x slower for idle pacing).
   static double earningsForLevel(int level) {
     if (level <= 0) return 0;
-    // Each level doubles: 1, 2, 4, 8, ...
-    return (1 << (level - 1)).toDouble();
+    // Each level doubles: 0.1, 0.2, 0.4, 0.8, ...
+    return (1 << (level - 1)).toDouble() / 10.0;
   }
 }

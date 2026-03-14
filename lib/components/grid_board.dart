@@ -40,6 +40,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   /// Reference to the trash holder (refreshed on layout).
   TrashHolder? _trashHolder;
 
+  /// Scrollable drawer container.
+  DrawerContainer? _drawerContainer;
+
   late Tetromino currentPiece;
 
   /// Track each piece placed on the grid so it can be dragged back.
@@ -156,9 +159,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
 
   /// Check whether the drag position is over the trash holder.
   bool _isOverTrash(Vector2 dragPos) {
-    if (_trashHolder == null) return false;
-    final tx = _trashHolder!.position.x;
-    final ty = _trashHolder!.position.y;
+    if (_trashHolder == null || _drawerContainer == null) return false;
+    final tx = _drawerContainer!.position.x + _trashHolder!.position.x;
+    final ty = _drawerContainer!.position.y + _trashHolder!.position.y;
     final ts = _trashHolder!.size.x;
     return dragPos.x + cellSize > tx &&
         dragPos.x < tx + ts &&
@@ -177,7 +180,8 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       final existing = drawerPieces[i];
       if (existing == null) continue;
       if (existing.level != piece.level) continue;
-      final slotCenterX = holders[i].position.x + holders[i].size.x / 2;
+      final dcX = _drawerContainer?.position.x ?? 0;
+      final slotCenterX = dcX + holders[i].position.x + holders[i].size.x / 2;
       final dist = (canvasX - slotCenterX).abs();
       if (dist < bestDist) {
         bestDist = dist;
@@ -243,7 +247,8 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     for (int i = 0; i < MyGame.drawerSlots; i++) {
       if (drawerPieces[i] != null) continue;
       if (canvasX == null) return i; // no position hint, take first
-      final slotCenterX = holders[i].position.x + holders[i].size.x / 2;
+      final dcX = _drawerContainer?.position.x ?? 0;
+      final slotCenterX = dcX + holders[i].position.x + holders[i].size.x / 2;
       final dist = (canvasX - slotCenterX).abs();
       if (dist < bestDist) {
         bestDist = dist;
@@ -307,14 +312,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         totalVerticalCells;
     final maxCellByWidth =
         (screenSize.x - cellPadding * (MyGame.columns + 1)) / MyGame.columns;
-    final totalDrawerSlots = MyGame.drawerSlots + 1; // +1 for trash cell
-    final maxCellByDrawer =
-        (screenSize.x - cellPadding * (totalDrawerSlots + 1)) /
-        totalDrawerSlots;
     cellSize = [
       maxCellByHeight,
       maxCellByWidth,
-      maxCellByDrawer,
     ].reduce((a, b) => a < b ? a : b);
 
     final mainGridWidth =
@@ -322,8 +322,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     final mainGridHeight = MyGame.rows * (cellSize + cellPadding) + cellPadding;
 
     final holderSize = cellSize;
-    final drawerWidth =
-        (MyGame.drawerSlots + 1) * (holderSize + cellPadding) + cellPadding;
+    final totalDrawerSlots = MyGame.drawerSlots + 1; // +1 for trash
+    final drawerContentWidth =
+        totalDrawerSlots * (holderSize + cellPadding) + cellPadding;
     final totalHeight = mainGridHeight + gap + holderSize;
     final topY = (screenSize.y - totalHeight) / 2;
 
@@ -351,32 +352,43 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       }
     }
 
-    // Drawer row
-    final drawerOffsetX = (screenSize.x - drawerWidth) / 2 + cellPadding;
-    final drawerOffsetY = topY + mainGridHeight + gap;
+    // Drawer row (scrollable container)
+    final drawerY = topY + mainGridHeight + gap;
+    final drawerFits = drawerContentWidth <= screenSize.x;
+    final drawerBaseX = drawerFits
+        ? (screenSize.x - drawerContentWidth) / 2 + cellPadding
+        : cellPadding;
+
+    _drawerContainer = DrawerContainer(
+      position: Vector2(0, drawerY),
+      size: Vector2(screenSize.x, holderSize),
+      board: this,
+      contentWidth: drawerContentWidth,
+    );
+    add(_drawerContainer!);
 
     for (int i = 0; i < MyGame.drawerSlots; i++) {
-      final x = drawerOffsetX + i * (holderSize + cellPadding);
+      final x = drawerBaseX + i * (holderSize + cellPadding);
       final holder = PieceHolder(
-        position: Vector2(x, drawerOffsetY),
+        position: Vector2(x, 0),
         size: Vector2.all(holderSize),
         piece: drawerPieces[i],
         board: this,
         index: i,
       );
       holders.add(holder);
-      add(holder);
+      _drawerContainer!.add(holder);
     }
 
-    // Trash cell (9th slot)
+    // Trash cell (last slot)
     final trashX =
-        drawerOffsetX + MyGame.drawerSlots * (holderSize + cellPadding);
+        drawerBaseX + MyGame.drawerSlots * (holderSize + cellPadding);
     _trashHolder = TrashHolder(
-      position: Vector2(trashX, drawerOffsetY),
+      position: Vector2(trashX, 0),
       size: Vector2.all(holderSize),
       board: this,
     );
-    add(_trashHolder!);
+    _drawerContainer!.add(_trashHolder!);
   }
 
   @override
@@ -606,8 +618,8 @@ class PieceHolder extends PositionComponent with DragCallbacks {
 
   @override
   void onDragStart(DragStartEvent event) {
-    super.onDragStart(event);
     if (piece == null) return;
+    super.onDragStart(event);
 
     final step = board.cellSize + GridBoard.cellPadding;
     int minR = 999, maxR = 0, minC = 999, maxC = 0;
@@ -756,6 +768,96 @@ class PieceHolder extends PositionComponent with DragCallbacks {
       pieceCenterY,
       miniCellSize * 0.6,
     );
+  }
+}
+
+// ──────────────────── DrawerContainer ────────────────────
+
+/// Scrollable container for the bottom drawer row. Clips children to the
+/// visible viewport and allows horizontal scrolling when content overflows.
+class DrawerContainer extends PositionComponent with DragCallbacks {
+  final GridBoard board;
+  final double contentWidth;
+  double _scrollX = 0;
+  double _maxScrollX = 0;
+
+  DrawerContainer({
+    required super.position,
+    required super.size,
+    required this.board,
+    required this.contentWidth,
+  });
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    _maxScrollX = (contentWidth - size.x).clamp(0.0, double.infinity);
+    add(RectangleHitbox());
+  }
+
+  @override
+  void render(Canvas canvas) {
+    canvas.clipRect(size.toRect());
+
+    // Scroll indicators
+    if (_maxScrollX > 0) {
+      final arrowPaint = Paint()..color = const Color(0x66FFFFFF);
+      final a = size.y * 0.2;
+      final cy = size.y / 2;
+      if (_scrollX > 1) {
+        canvas.drawPath(
+          Path()
+            ..moveTo(a, cy - a)
+            ..lineTo(2, cy)
+            ..lineTo(a, cy + a)
+            ..close(),
+          arrowPaint,
+        );
+      }
+      if (_scrollX < _maxScrollX - 1) {
+        canvas.drawPath(
+          Path()
+            ..moveTo(size.x - a, cy - a)
+            ..lineTo(size.x - 2, cy)
+            ..lineTo(size.x - a, cy + a)
+            ..close(),
+          arrowPaint,
+        );
+      }
+    }
+  }
+
+  @override
+  void onDragStart(DragStartEvent event) {
+    // Don't start scroll tracking if a child is dragging a piece.
+    for (final child in children) {
+      if (child is PieceHolder && child._dragPiece != null) return;
+    }
+    super.onDragStart(event);
+  }
+
+  @override
+  void onDragUpdate(DragUpdateEvent event) {
+    if (_maxScrollX <= 0) return;
+    _scrollX = (_scrollX - event.localDelta.x).clamp(0.0, _maxScrollX);
+    _repositionItems();
+  }
+
+  void _repositionItems() {
+    final step = board.cellSize + GridBoard.cellPadding;
+    final totalSlots = MyGame.drawerSlots + 1;
+    final totalWidth =
+        totalSlots * (board.cellSize + GridBoard.cellPadding) +
+        GridBoard.cellPadding;
+    final fits = totalWidth <= size.x;
+    final baseX = fits
+        ? (size.x - totalWidth) / 2 + GridBoard.cellPadding
+        : GridBoard.cellPadding - _scrollX;
+
+    for (int i = 0; i < board.holders.length; i++) {
+      board.holders[i].position.x = baseX + i * step;
+    }
+    board._trashHolder?.position.x = baseX + MyGame.drawerSlots * step;
   }
 }
 
