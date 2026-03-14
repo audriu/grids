@@ -263,29 +263,28 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   /// Given the canvas-space position of the dragged piece's top-left corner,
   /// return the best grid origin `(row, col)` or `null` if invalid.
   (int, int)? findSnapOrigin(Tetromino piece, Vector2 dragPos) {
-    int minR = 999, maxR = 0, minC = 999, maxC = 0;
+    int minR = 999, minC = 999;
     for (final (r, c) in piece.cells) {
       if (r < minR) minR = r;
-      if (r > maxR) maxR = r;
       if (c < minC) minC = c;
-      if (c > maxC) maxC = c;
     }
 
     final step = cellSize + cellPadding;
 
-    // Centre of the dragged bounding box in canvas space.
-    final centerX = dragPos.x + (maxC - minC + 1) * step / 2;
-    final centerY = dragPos.y + (maxR - minR + 1) * step / 2;
+    // The top-left visible cell (minR, minC) is drawn at dragPos in the
+    // DraggablePiece. Find which grid cell its centre is closest to.
+    final anchorCenterX = dragPos.x + cellSize / 2;
+    final anchorCenterY = dragPos.y + cellSize / 2;
 
-    // Nearest grid cell under that centre.
-    final centerGridCol = ((centerX - mainOffsetX + step / 2) / step).floor();
-    final centerGridRow = ((centerY - mainOffsetY + step / 2) / step).floor();
+    final snapCol =
+        ((anchorCenterX - mainOffsetX - cellSize / 2 + step / 2) / step)
+            .floor();
+    final snapRow =
+        ((anchorCenterY - mainOffsetY - cellSize / 2 + step / 2) / step)
+            .floor();
 
-    // Map shape-centre cell → that grid cell → derive piece origin.
-    final midR = (minR + maxR) ~/ 2;
-    final midC = (minC + maxC) ~/ 2;
-    final originRow = centerGridRow - midR;
-    final originCol = centerGridCol - midC;
+    final originCol = snapCol - minC;
+    final originRow = snapRow - minR;
 
     // Validate every cell.
     for (final (r, c) in piece.cells) {
