@@ -286,9 +286,12 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         totalVerticalCells;
     final maxCellByWidth =
         (screenSize.x - cellPadding * (MyGame.columns + 1)) / MyGame.columns;
-    cellSize = maxCellByHeight < maxCellByWidth
-        ? maxCellByHeight
-        : maxCellByWidth;
+    final maxCellByDrawer =
+        (screenSize.x - cellPadding * (MyGame.drawerSlots + 1)) /
+        MyGame.drawerSlots;
+    cellSize = [maxCellByHeight, maxCellByWidth, maxCellByDrawer].reduce(
+      (a, b) => a < b ? a : b,
+    );
 
     final mainGridWidth =
         MyGame.columns * (cellSize + cellPadding) + cellPadding;
