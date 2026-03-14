@@ -141,6 +141,7 @@ class ShopOverlay extends PositionComponent
   void _renderLockedRow(Canvas canvas, double panelX, double y) {
     final rowX = panelX + _padding;
     final rowW = _panelWidth - _padding * 2;
+    final nextLevel = game.maxUnlockedLevel + 1;
 
     final rowRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(rowX, y, rowW, _rowHeight - 4),
@@ -156,7 +157,7 @@ class ShopOverlay extends PositionComponent
     final builder =
         ParagraphBuilder(ParagraphStyle(textAlign: TextAlign.center))
           ..pushStyle(style)
-          ..addText('🔒 Locked');
+          ..addText('🔒 Level $nextLevel Locked');
     final p = builder.build()..layout(ParagraphConstraints(width: rowW));
     canvas.drawParagraph(p, Offset(rowX, y + (_rowHeight - 4 - p.height) / 2));
   }
