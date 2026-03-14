@@ -34,6 +34,12 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   /// Drawer slot index highlighted for a merge (red), -1 = none.
   int _mergeHighlightIndex = -1;
 
+  /// Whether the trash cell is currently highlighted.
+  bool _trashHighlighted = false;
+
+  /// Reference to the trash holder (refreshed on layout).
+  TrashHolder? _trashHolder;
+
   late Tetromino currentPiece;
 
   /// Track each piece placed on the grid so it can be dragged back.
@@ -124,6 +130,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     _highlightColor = null;
     _highlightedDrawerIndex = -1;
     _mergeHighlightIndex = -1;
+    _trashHighlighted = false;
     if (piece != null && dragPos != null) {
       final snap = findSnapOrigin(piece, dragPos);
       if (snap != null) {
@@ -131,6 +138,8 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         for (final (r, c) in piece.cells) {
           _highlightedCells.add((snap.$1 + r, snap.$2 + c));
         }
+      } else if (_isOverTrash(dragPos)) {
+        _trashHighlighted = true;
       } else {
         // Check for merge target in drawer.
         final mergeIdx = _findMergeTarget(piece, dragPos.x, dragSourceSlot);
@@ -143,6 +152,18 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       }
     }
     _refreshCellColors();
+  }
+
+  /// Check whether the drag position is over the trash holder.
+  bool _isOverTrash(Vector2 dragPos) {
+    if (_trashHolder == null) return false;
+    final tx = _trashHolder!.position.x;
+    final ty = _trashHolder!.position.y;
+    final ts = _trashHolder!.size.x;
+    return dragPos.x + cellSize > tx &&
+        dragPos.x < tx + ts &&
+        dragPos.y + cellSize > ty &&
+        dragPos.y < ty + ts;
   }
 
   /// Find the nearest drawer slot that holds a piece of the same level for
@@ -286,12 +307,15 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
         totalVerticalCells;
     final maxCellByWidth =
         (screenSize.x - cellPadding * (MyGame.columns + 1)) / MyGame.columns;
+    final totalDrawerSlots = MyGame.drawerSlots + 1; // +1 for trash cell
     final maxCellByDrawer =
-        (screenSize.x - cellPadding * (MyGame.drawerSlots + 1)) /
-        MyGame.drawerSlots;
-    cellSize = [maxCellByHeight, maxCellByWidth, maxCellByDrawer].reduce(
-      (a, b) => a < b ? a : b,
-    );
+        (screenSize.x - cellPadding * (totalDrawerSlots + 1)) /
+        totalDrawerSlots;
+    cellSize = [
+      maxCellByHeight,
+      maxCellByWidth,
+      maxCellByDrawer,
+    ].reduce((a, b) => a < b ? a : b);
 
     final mainGridWidth =
         MyGame.columns * (cellSize + cellPadding) + cellPadding;
@@ -299,7 +323,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
 
     final holderSize = cellSize;
     final drawerWidth =
-        MyGame.drawerSlots * (holderSize + cellPadding) + cellPadding;
+        (MyGame.drawerSlots + 1) * (holderSize + cellPadding) + cellPadding;
     final totalHeight = mainGridHeight + gap + holderSize;
     final topY = (screenSize.y - totalHeight) / 2;
 
@@ -343,6 +367,16 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       holders.add(holder);
       add(holder);
     }
+
+    // Trash cell (9th slot)
+    final trashX =
+        drawerOffsetX + MyGame.drawerSlots * (holderSize + cellPadding);
+    _trashHolder = TrashHolder(
+      position: Vector2(trashX, drawerOffsetY),
+      size: Vector2.all(holderSize),
+      board: this,
+    );
+    add(_trashHolder!);
   }
 
   @override
@@ -515,6 +549,9 @@ class Cell extends RectangleComponent with DragCallbacks {
       if (snap != null) {
         board!.placePiece(piece, snap.$1, snap.$2);
         placed = true;
+      } else if (board!._isOverTrash(_dragPiece!.position)) {
+        // Trash the piece — just discard it.
+        placed = true;
       } else {
         // Check for merge target in drawer.
         final mergeIdx = board!._findMergeTarget(piece, _dragPiece!.position.x);
@@ -610,6 +647,10 @@ class PieceHolder extends PositionComponent with DragCallbacks {
     final snap = board.findSnapOrigin(piece!, _dragPiece!.position);
     if (snap != null) {
       board.placePiece(piece!, snap.$1, snap.$2);
+      piece = null;
+      board.drawerPieces[index] = null;
+    } else if (board._isOverTrash(_dragPiece!.position)) {
+      // Trash the piece from drawer.
       piece = null;
       board.drawerPieces[index] = null;
     } else {
@@ -715,6 +756,103 @@ class PieceHolder extends PositionComponent with DragCallbacks {
       pieceCenterY,
       miniCellSize * 0.6,
     );
+  }
+}
+
+// ──────────────────── TrashHolder ────────────────────────
+
+/// A special drawer cell that deletes any piece dropped on it.
+class TrashHolder extends PositionComponent {
+  final GridBoard board;
+
+  TrashHolder({
+    required super.position,
+    required super.size,
+    required this.board,
+  });
+
+  @override
+  void render(Canvas canvas) {
+    final highlighted = board._trashHighlighted;
+
+    // Background
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(size.toRect(), const Radius.circular(4)),
+      Paint()
+        ..color = highlighted
+            ? const Color(0x88000000)
+            : const Color(0xFF2A2A4A),
+    );
+
+    // Border when highlighted
+    if (highlighted) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(size.toRect(), const Radius.circular(4)),
+        Paint()
+          ..color = const Color(0xFFFF4444)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+    }
+
+    // Trash can icon
+    _drawTrashIcon(canvas, size.x, size.y);
+  }
+
+  void _drawTrashIcon(Canvas canvas, double w, double h) {
+    final paint = Paint()
+      ..color = const Color(0xFF888888)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    final fillPaint = Paint()..color = const Color(0xFF888888);
+
+    final cx = w / 2;
+    final iconH = h * 0.5;
+    final iconW = w * 0.4;
+    final top = (h - iconH) / 2;
+
+    // Lid
+    final lidY = top;
+    final lidLeft = cx - iconW / 2 - iconW * 0.1;
+    final lidRight = cx + iconW / 2 + iconW * 0.1;
+    canvas.drawLine(Offset(lidLeft, lidY), Offset(lidRight, lidY), paint);
+
+    // Lid handle
+    final handleW = iconW * 0.3;
+    final handleH = iconH * 0.12;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(cx - handleW / 2, lidY - handleH, handleW, handleH),
+        const Radius.circular(2),
+      ),
+      paint,
+    );
+
+    // Body (trapezoid-ish bucket)
+    final bodyTop = lidY + iconH * 0.08;
+    final bodyBottom = top + iconH;
+    final bodyTopLeft = cx - iconW / 2;
+    final bodyTopRight = cx + iconW / 2;
+    final bodyBotLeft = cx - iconW / 2 + iconW * 0.08;
+    final bodyBotRight = cx + iconW / 2 - iconW * 0.08;
+
+    final path = Path()
+      ..moveTo(bodyTopLeft, bodyTop)
+      ..lineTo(bodyBotLeft, bodyBottom)
+      ..lineTo(bodyBotRight, bodyBottom)
+      ..lineTo(bodyTopRight, bodyTop)
+      ..close();
+    canvas.drawPath(path, fillPaint..color = const Color(0xFF3A3A5C));
+    canvas.drawPath(path, paint);
+
+    // Vertical lines on body
+    final lineY1 = bodyTop + iconH * 0.15;
+    final lineY2 = bodyBottom - iconH * 0.1;
+    for (final frac in [0.35, 0.5, 0.65]) {
+      final lx = cx - iconW / 2 + iconW * frac;
+      canvas.drawLine(Offset(lx, lineY1), Offset(lx, lineY2), paint);
+    }
   }
 }
 
