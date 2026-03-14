@@ -19,7 +19,7 @@ class CashHud extends PositionComponent with HasGameReference<MyGame> {
   @override
   void render(Canvas canvas) {
     final cashText = '€${game.cash.toStringAsFixed(1)}';
-    final epsText = '€${game.earningsPerSecond.toStringAsFixed(1)}/s';
+    final epsText = '€${game.earningsPerSecond.toStringAsFixed(2)}/s';
 
     final cashStyle = TextStyle(
       color: const Color(0xFFFFFFFF),

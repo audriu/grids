@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 
@@ -95,7 +97,7 @@ class MyGame extends FlameGame with HasCollisionDetection {
   /// Earnings per second for a given level (10x slower for idle pacing).
   static double earningsForLevel(int level) {
     if (level <= 0) return 0;
-    // Each level doubles: 0.1, 0.2, 0.4, 0.8, ...
-    return (1 << (level - 1)).toDouble() / 10.0;
+    // Each level is 1.5x the previous: 0.1, 0.15, 0.225, ...
+    return 0.1 * pow(1.5, level - 1);
   }
 }
