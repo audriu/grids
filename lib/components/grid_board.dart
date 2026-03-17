@@ -34,6 +34,9 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
   /// Drawer slot index highlighted for a merge (red), -1 = none.
   int _mergeHighlightIndex = -1;
 
+  /// Grid cells highlighted for a merge on the grid.
+  final Set<(int, int)> _gridMergeHighlightCells = {};
+
   /// Whether the trash cell is currently highlighted.
   bool _trashHighlighted = false;
 
@@ -108,7 +111,10 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     for (final child in children) {
       if (child is Cell) {
         final key = (child.row, child.col);
-        if (_highlightedCells.contains(key)) {
+        if (_gridMergeHighlightCells.contains(key)) {
+          child.paint = Paint()
+            ..color = const Color(0xFFFF4444).withAlpha(140);
+        } else if (_highlightedCells.contains(key)) {
           child.paint = Paint()
             ..color = (_highlightColor ?? const Color(0xFFFFFFFF)).withAlpha(
               140,
@@ -133,6 +139,7 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     _highlightColor = null;
     _highlightedDrawerIndex = -1;
     _mergeHighlightIndex = -1;
+    _gridMergeHighlightCells.clear();
     _trashHighlighted = false;
     if (piece != null && dragPos != null) {
       final snap = findSnapOrigin(piece, dragPos);
@@ -144,13 +151,23 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
       } else if (_isOverTrash(dragPos)) {
         _trashHighlighted = true;
       } else {
-        // Check for merge target in drawer.
-        final mergeIdx = _findMergeTarget(piece, dragPos.x, dragSourceSlot);
-        if (mergeIdx != -1) {
-          _mergeHighlightIndex = mergeIdx;
-        } else if (isFromGrid) {
-          final idx = _findNearestEmptySlot(dragPos.x);
-          if (idx != -1) _highlightedDrawerIndex = idx;
+        // Check for grid merge target first.
+        final gridTarget = findGridMergeTarget(piece, dragPos);
+        if (gridTarget != null) {
+          for (final (r, c) in gridTarget.piece.cells) {
+            _gridMergeHighlightCells.add(
+              (gridTarget.originRow + r, gridTarget.originCol + c),
+            );
+          }
+        } else {
+          // Check for merge target in drawer.
+          final mergeIdx = _findMergeTarget(piece, dragPos.x, dragSourceSlot);
+          if (mergeIdx != -1) {
+            _mergeHighlightIndex = mergeIdx;
+          } else if (isFromGrid) {
+            final idx = _findNearestEmptySlot(dragPos.x);
+            if (idx != -1) _highlightedDrawerIndex = idx;
+          }
         }
       }
     }
@@ -199,6 +216,41 @@ class GridBoard extends PositionComponent with HasGameReference<MyGame> {
     drawerPieces[targetIdx] = merged;
     if (targetIdx < holders.length) holders[targetIdx].piece = merged;
     // Unlock in shop if needed.
+    if (newLevel > game.maxUnlockedLevel) {
+      game.unlockNextLevel();
+    }
+  }
+
+  /// Find a placed piece on the grid under [dragPos] that can merge with
+  /// [piece] (same level). Returns the target record or `null`.
+  ({Tetromino piece, int originRow, int originCol})? findGridMergeTarget(
+    Tetromino piece,
+    Vector2 dragPos,
+  ) {
+    final step = cellSize + cellPadding;
+    final centerX = dragPos.x + cellSize / 2;
+    final centerY = dragPos.y + cellSize / 2;
+    final col = ((centerX - mainOffsetX) / step).floor();
+    final row = ((centerY - mainOffsetY) / step).floor();
+    if (row < 0 || row >= MyGame.rows || col < 0 || col >= MyGame.columns) {
+      return null;
+    }
+    final target = findPlacedPieceAt(row, col);
+    if (target == null) return null;
+    if (target.piece.level != piece.level) return null;
+    return target;
+  }
+
+  /// Merge dragged [piece] with a placed [target] on the grid. The target is
+  /// removed and the merged piece is placed in the drawer.
+  void mergeWithGridPiece(
+    Tetromino piece,
+    ({Tetromino piece, int originRow, int originCol}) target,
+  ) {
+    removePlacedPiece(target);
+    final newLevel = piece.level + 1;
+    final merged = Tetromino.random(level: newLevel);
+    returnPieceToDrawer(merged);
     if (newLevel > game.maxUnlockedLevel) {
       game.unlockNextLevel();
     }
@@ -564,13 +616,25 @@ class Cell extends RectangleComponent with DragCallbacks {
         // Trash the piece — just discard it.
         placed = true;
       } else {
-        // Check for merge target in drawer.
-        final mergeIdx = board!._findMergeTarget(piece, _dragPiece!.position.x);
-        if (mergeIdx != -1) {
-          board!.mergePieces(piece, mergeIdx);
+        // Check for grid merge target.
+        final gridTarget = board!.findGridMergeTarget(
+          piece,
+          _dragPiece!.position,
+        );
+        if (gridTarget != null) {
+          board!.mergeWithGridPiece(piece, gridTarget);
           placed = true;
         } else {
-          placed = board!.returnPieceToDrawer(piece, _dragPiece!.position.x);
+          // Check for merge target in drawer.
+          final mergeIdx =
+              board!._findMergeTarget(piece, _dragPiece!.position.x);
+          if (mergeIdx != -1) {
+            board!.mergePieces(piece, mergeIdx);
+            placed = true;
+          } else {
+            placed =
+                board!.returnPieceToDrawer(piece, _dragPiece!.position.x);
+          }
         }
       }
     }
@@ -665,16 +729,27 @@ class PieceHolder extends PositionComponent with DragCallbacks {
       piece = null;
       board.drawerPieces[index] = null;
     } else {
-      // Check for merge target.
-      final mergeIdx = board._findMergeTarget(
+      // Check for grid merge target.
+      final gridTarget = board.findGridMergeTarget(
         piece!,
-        _dragPiece!.position.x,
-        index,
+        _dragPiece!.position,
       );
-      if (mergeIdx != -1) {
-        board.mergePieces(piece!, mergeIdx);
+      if (gridTarget != null) {
+        board.mergeWithGridPiece(piece!, gridTarget);
         piece = null;
         board.drawerPieces[index] = null;
+      } else {
+        // Check for drawer merge target.
+        final mergeIdx = board._findMergeTarget(
+          piece!,
+          _dragPiece!.position.x,
+          index,
+        );
+        if (mergeIdx != -1) {
+          board.mergePieces(piece!, mergeIdx);
+          piece = null;
+          board.drawerPieces[index] = null;
+        }
       }
     }
 
