@@ -657,7 +657,8 @@ class Cell extends RectangleComponent with DragCallbacks {
 // ────────────────────── PieceHolder ──────────────────────
 
 /// Drawer square that shows a miniature tetromino and is draggable.
-class PieceHolder extends PositionComponent with DragCallbacks {
+class PieceHolder extends PositionComponent
+    with DragCallbacks, TapCallbacks, SecondaryTapCallbacks {
   Tetromino? piece;
   final GridBoard board;
   final int index;
@@ -675,6 +676,20 @@ class PieceHolder extends PositionComponent with DragCallbacks {
   Future<void> onLoad() async {
     await super.onLoad();
     add(RectangleHitbox());
+  }
+
+  // ── tap to rotate ──
+
+  @override
+  void onTapUp(TapUpEvent event) {
+    if (piece == null) return;
+    piece!.rotateCW();
+  }
+
+  @override
+  void onSecondaryTapUp(SecondaryTapUpEvent event) {
+    if (piece == null) return;
+    piece!.rotateCCW();
   }
 
   // ── drag handling ──

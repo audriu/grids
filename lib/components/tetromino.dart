@@ -38,8 +38,8 @@ class Tetromino {
   /// Level displayed at the centre of the piece (default 1).
   int level;
 
-  /// Shape as list of (row, col) offsets within a 2x4 grid.
-  late final List<(int, int)> cells;
+  /// Shape as list of (row, col) offsets (mutable for rotation).
+  late List<(int, int)> cells;
 
   /// Color for this piece.
   late final Color color;
@@ -47,6 +47,25 @@ class Tetromino {
   Tetromino(this.type, {this.level = 1}) {
     cells = _shapeCells(type);
     color = _shapeColor(type);
+  }
+
+  /// Rotate 90° clockwise: (r, c) → (c, -r), then normalise to top-left.
+  void rotateCW() {
+    cells = _normalise(cells.map((rc) => (rc.$2, -rc.$1)).toList());
+  }
+
+  /// Rotate 90° counter-clockwise: (r, c) → (-c, r), then normalise.
+  void rotateCCW() {
+    cells = _normalise(cells.map((rc) => (-rc.$2, rc.$1)).toList());
+  }
+
+  static List<(int, int)> _normalise(List<(int, int)> raw) {
+    int minR = raw.first.$1, minC = raw.first.$2;
+    for (final (r, c) in raw) {
+      if (r < minR) minR = r;
+      if (c < minC) minC = c;
+    }
+    return raw.map((rc) => (rc.$1 - minR, rc.$2 - minC)).toList();
   }
 
   static Tetromino random({int level = 1}) {
